@@ -50,22 +50,33 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     assets_dir = os.path.join(repo_dir, "assets")
     make_dir(assets_dir)
 
-    # 保存图片并替换为本地链接
-    # pattern = r'(\!\[image.png\]\((https:\/\/cdn\.nlark\.com\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
-    # FixBug: 部分图片格式为 ![](https://cdn.nlark.com/.../xxx.jpeg)
-    pattern = r'(\!\[(.*)\]\((https:\/\/cdn\.nlark\.com\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
-    images = [index for index in re.findall(pattern, body)]
-
+    # 保存图片
+    pattern_images = r'(\!\[(.*)\]\((https:\/\/cdn\.nlark\.com\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
+    images = [index for index in re.findall(pattern_images, body)]
     if images:
         for index, image in enumerate(images):
             image_body = image[0]                                # 图片完整代码
             image_url = image[2]                                 # 图片链接
             image_suffix = image_url.split(".")[-1]              # 图片后缀
-
             local_abs_path = f"{assets_dir}/{doc_title}-{str(index)}.{image_suffix}"  # 保存图片的绝对路径
             local_md_path = f"![{doc_title}-{str(index)}](assets/{doc_title}-{str(index)}.{image_suffix})"  # 图片相对路径完整代码
-            await download_images(image_url, local_abs_path)      # 下载图片
-            body = body.replace(image_body, local_md_path)        # 替换链接
+            await download_images(image_url, local_abs_path)     # 下载图片
+            body = body.replace(image_body, local_md_path)       # 替换链接
+
+    # 保存附件: 直接访问附件会302跳转到鉴权页面,无法直接下载,因此这里仅作记录
+    pattern_annexes = r'(\[(.*)\]\((https:\/\/www\.yuque\.com\/attachments\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
+    annexes = [index for index in re.findall(pattern_annexes, body)]
+    if annexes:
+        output = f"## Annex-{repo_name}-{doc_title} \n"          # 记录附件链接
+        output_file = os.path.join(base_dir, f"Annex-{repo_name}-{doc_title}.md")
+        for index, annex in enumerate(annexes):
+            annex_body = annex[0]                                # 附件完整代码
+            annex_name = annex[1]                                # 附件名称
+            print(que(f"File {index + 1}: {annex_name} ..."))
+            output += f"- {annex_body} \n"
+        with open(output_file, "w+") as f:
+            f.write(output)
+        print(good(f"Found {len(annexes)} Files, Written into {output_file}"))
 
     # 保存文档
     markdown_path = f"{repo_dir}/{doc_title}.md"
