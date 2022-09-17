@@ -3,7 +3,7 @@ import re
 import os
 import asyncio
 import aiohttp
-
+from urllib import parse
 from pyuque.client import Yuque
 from huepy import *
 from prettytable import PrettyTable
@@ -67,21 +67,28 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     pattern_annexes = r'(\[(.*)\]\((https:\/\/www\.yuque\.com\/attachments\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
     annexes = [index for index in re.findall(pattern_annexes, body)]
     if annexes:
-        output = f"## Annex-{repo_name}-{doc_title} \n"          # 记录附件链接
-        output_file = os.path.join(base_dir, f"Annex-{repo_name}-{doc_title}.md")
+        # 记录附件链接
+        record_annex_output = f"## Annex-{repo_name}-{doc_title} \n"
+        record_annex_file = os.path.join(base_dir, f"Annex-{repo_name}-{doc_title}.md")
         for index, annex in enumerate(annexes):
             annex_body = annex[0]                                # 附件完整代码
             annex_name = annex[1]                                # 附件名称
             print(que(f"File {index + 1}: {annex_name} ..."))
-            output += f"- {annex_body} \n"
-        with open(output_file, "w+") as f:
-            f.write(output)
-        print(good(f"Found {len(annexes)} Files, Written into {output_file}"))
+            record_annex_output += f"- {annex_body} \n"
+        with open(record_annex_file, "w+") as f:
+            f.write(record_annex_output)
+        print(good(f"Found {len(annexes)} Files, Written into {record_annex_file}"))
 
     # 保存文档
     markdown_path = f"{repo_dir}/{doc_title}.md"
     with open(markdown_path, "w", encoding="utf-8") as f:
         f.write(body)
+
+    # 记录下载文档
+    record_doc_file = os.path.join(base_dir, f"{repo_name}.md")
+    record_doc_output = f"- [{doc_title}](./{repo_name}/{doc_title}.md) \n"
+    with open(record_doc_file, "a+") as f:
+        f.write(record_doc_output)
 
 
 async def download_images(image, local_name):
@@ -110,21 +117,29 @@ async def main():
         repo_table.add_row([repo_id, repo_name])
     print(repo_table)
 
-    temp_id = input(lcyan("Repo ID: "))
-    if temp_id in all_repos:
-        repo = {temp_id: all_repos[temp_id]}
-    else:
-        print(bad(red("Repo Not Found !")))
-        sys.exit(0)
+    # 输入知识库ID,可输出多个,以逗号分隔
+    input_ids = input(lcyan("Repo ID (Example: 111,222): "))
+    temp_ids = [ temp.strip() for temp in input_ids.split(",") ]
+
+    # 检查全部知识库id
+    for temp_id in temp_ids:
+        if temp_id not in all_repos:
+            print(bad(red(f"Repo ID {temp_id} Not Found !")))
+            sys.exit(0)
 
     # 获取知识库全部文档
-    for repo_id, repo_name in repo.items():
-        all_docs = get_docs(repo_id)
-        print(cyan(f"\n=====  {repo_name}: {len(all_docs)} docs ===== "))
-        # 获取文档内容
-        for doc_id, doc_title in all_docs.items():
-            print(run(cyan(f"Get Doc {doc_title} ...")))
-            await download_md(repo_id, repo_name, doc_id, doc_title)
+    for temp_id in temp_ids:
+        repo = {temp_id: all_repos[temp_id]}     # 根据知识库ID获取知识库名称
+        for repo_id, repo_name in repo.items():
+            all_docs = get_docs(repo_id)
+            print(cyan(f"\n=====  {repo_name}: {len(all_docs)} docs ===== "))
+            # 获取文档内容
+            for doc_id, doc_title in all_docs.items():
+                # 将不能作为文件名的字符进行编码
+                for char in r'/\<>?:"|*':
+                    doc_title = doc_title.replace(char, parse.quote_plus(char))
+                print(run(cyan(f"Get Doc {doc_title} ...")))
+                await download_md(repo_id, repo_name, doc_id, doc_title)
 
 
 if __name__ == '__main__':
