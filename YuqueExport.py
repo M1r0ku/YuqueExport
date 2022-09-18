@@ -84,9 +84,11 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     with open(markdown_path, "w", encoding="utf-8") as f:
         f.write(body)
 
-    # 记录下载文档
+    # 建立文档索引
+    # 对索引文档标题中的特殊符号进行编码
+    doc_title_temp = doc_title.replace(" ","%20").replace("(","%28").replace(")","%29")
     record_doc_file = os.path.join(base_dir, f"{repo_name}.md")
-    record_doc_output = f"- [{doc_title}](./{repo_name}/{doc_title}.md) \n"
+    record_doc_output = f"- [{doc_title}](./{repo_name}/{doc_title_temp}.md) \n"
     with open(record_doc_file, "a+") as f:
         f.write(record_doc_output)
 
