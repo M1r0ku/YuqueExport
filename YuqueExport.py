@@ -114,12 +114,12 @@ async def main():
 
     # 获取知识库列表
     all_repos = get_repos(user_id)
-    repo_table = PrettyTable(["ID", "Name"])
+    repos_table = PrettyTable(["ID", "Name"])
     for repo_id, repo_name in all_repos.items():
-        repo_table.add_row([repo_id, repo_name])
-    print(repo_table)
+        repos_table.add_row([repo_id, repo_name])
+    print(repos_table)
 
-    # 输入知识库ID,可输出多个,以逗号分隔
+    # 输入知识库ID,可输入多个,以逗号分隔
     input_ids = input(lcyan("Repo ID (Example: 111,222): "))
     temp_ids = [ temp.strip() for temp in input_ids.split(",") ]
 
@@ -133,8 +133,32 @@ async def main():
     for temp_id in temp_ids:
         repo = {temp_id: all_repos[temp_id]}     # 根据知识库ID获取知识库名称
         for repo_id, repo_name in repo.items():
+            # 获取文档列表
             all_docs = get_docs(repo_id)
             print(cyan(f"\n=====  {repo_name}: {len(all_docs)} docs ===== "))
+            docs_table = PrettyTable(["Doc", "Title"])
+            for doc_id, doc_title in all_docs.items():
+                docs_table.add_row([doc_id, doc_title])
+            print(docs_table)
+
+            # 输入文档ID,可输入多个,以逗号分隔
+            input_doc_ids = input(lcyan("Doc ID (Example: 111,222 or ALL): "))
+            temp_doc_ids = [temp.strip() for temp in input_doc_ids.split(",")]
+
+            # 判断是否获取全部文档
+            is_all = "all" in [temp.lower() for temp in temp_doc_ids]
+
+            # 根据文档ID获取指定文档
+            if not is_all:
+                temp_docs = dict()
+                for temp_doc_id in temp_doc_ids:
+                    try:
+                        temp_docs[temp_doc_id] = all_docs[temp_doc_id]
+                    except KeyError:
+                        print(bad(red(f"Doc ID {temp_doc_id} Not Found !!")))
+                # 将需要获取的文档赋值给all_docs
+                all_docs = temp_docs
+
             # 获取文档内容
             for doc_id, doc_title in all_docs.items():
                 # 将不能作为文件名的字符进行编码
