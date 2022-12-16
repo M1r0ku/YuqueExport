@@ -60,8 +60,9 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
             image_body = image[0]                                # 图片完整代码
             image_url = image[2]                                 # 图片链接
             image_suffix = image_url.split(".")[-1]              # 图片后缀
-            local_abs_path = f"{assets_dir}/{doc_title}-{str(index)}.{image_suffix}"  # 保存图片的绝对路径
-            local_md_path = f"![{doc_title}-{str(index)}](assets/{doc_title}-{str(index)}.{image_suffix})"  # 图片相对路径完整代码
+            local_abs_path = f"{assets_dir}/{doc_title}-{str(index)}.{image_suffix}"                # 保存图片的绝对路径
+            doc_title_temp = doc_title.replace(" ", "%20").replace("(", "%28").replace(")", "%29")  # 对特殊符号进行编码
+            local_md_path = f"![{doc_title_temp}-{str(index)}](assets/{doc_title_temp}-{str(index)}.{image_suffix})"  # 图片相对路径完整代码
             await download_images(image_url, local_abs_path)     # 下载图片
             body = body.replace(image_body, local_md_path)       # 替换链接
 
