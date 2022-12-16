@@ -34,17 +34,19 @@ def get_body(repo_id, doc_id):
     doc = yuque.doc_get(repo_id, doc_id)
     body = doc['data']['body']
     body = re.sub("<a name=\"(\w.*)\"></a>", "", body)                 # 正则去除语雀导出的<a>标签
-    body = re.sub(r'\<br \/\>!\[image.png\]', "\n![image.png]", body)  # 正则去除语雀导出的图片后紧跟的<br \>标签
-    body = re.sub(r'\)\<br \/\>', ")\n", body)                         # 正则去除语雀导出的图片后紧跟的<br \>标签
+    body = re.sub(r'\<br \/\>', "\n", body)                            # 正则去除语雀导出的<br />标签
+    body = re.sub(r'\<br \/\>!\[image.png\]', "\n![image.png]", body)  # 正则去除语雀导出的图片后紧跟的<br />标签
+    body = re.sub(r'\)\<br \/\>', ")\n", body)                         # 正则去除语雀导出的图片后紧跟的<br />标签
     body = re.sub(r'png[#?](.*)+', 'png)', body)                       # 正则去除语雀图片链接特殊符号后的字符串
     body = re.sub(r'jpeg[#?](.*)+', 'jpeg)', body)                     # 正则去除语雀图片链接特殊符号后的字符串
     return body
 
 
+# 解析文档Markdown代码
 async def download_md(repo_id, repo_name, doc_id, doc_title):
     body = get_body(repo_id, doc_id)
 
-    # 创建文档目录及子目录
+    # 创建文档目录及存放资源的子目录
     repo_dir = os.path.join(base_dir, repo_name)
     make_dir(repo_dir)
     assets_dir = os.path.join(repo_dir, "assets")
@@ -63,21 +65,19 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
             await download_images(image_url, local_abs_path)     # 下载图片
             body = body.replace(image_body, local_md_path)       # 替换链接
 
-    # 保存附件: 直接访问附件会302跳转到鉴权页面,无法直接下载,因此这里仅作记录
+    # 保存附件
     pattern_annexes = r'(\[(.*)\]\((https:\/\/www\.yuque\.com\/attachments\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
     annexes = [index for index in re.findall(pattern_annexes, body)]
     if annexes:
-        # 记录附件链接
-        record_annex_output = f"## Annex-{repo_name}-{doc_title} \n"
-        record_annex_file = os.path.join(base_dir, f"Annex-{repo_name}-{doc_title}.md")
         for index, annex in enumerate(annexes):
-            annex_body = annex[0]                                # 附件完整代码
-            annex_name = annex[1]                                # 附件名称
-            print(que(f"File {index + 1}: {annex_name} ..."))
-            record_annex_output += f"- {annex_body} \n"
-        with open(record_annex_file, "w+") as f:
-            f.write(record_annex_output)
-        print(good(f"Found {len(annexes)} Files, Written into {record_annex_file}"))
+            annex_body = annex[0]                                # 附件完整代码 [xxx.zip](https://www.yuque.com/attachments/yuque/.../xxx.zip)
+            annex_name = annex[1]                                # 附件名称 xxx.zip
+            annex_url = re.findall(r'\((https:\/\/.*?)\)', annex_body)                # 从附件代码中提取附件链接
+            annex_url = annex_url[0].replace("/attachments/", "/api/v2/attachments/") # 替换为附件API
+            local_abs_path = f"{assets_dir}/{annex_name}"           # 保存附件的绝对路径
+            local_md_path = f"[{annex_name}](assets/{annex_name})"  # 附件相对路径完整代码
+            await download_annex(annex_url, local_abs_path)         # 下载附件
+            body = body.replace(annex_body, local_md_path)          # 替换链接
 
     # 保存文档
     markdown_path = f"{repo_dir}/{doc_title}.md"
@@ -92,11 +92,24 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     with open(record_doc_file, "a+") as f:
         f.write(record_doc_output)
 
-
+# 下载图片
 async def download_images(image, local_name):
     print(good(f"Download {local_name} ..."))
     async with aiohttp.ClientSession() as session:
         async with session.get(image) as resp:
+            with open(local_name, "wb") as f:
+                f.write(await resp.content.read())
+
+
+# 下载附件
+async def download_annex(annex, local_name):
+    print(good(f"Download {local_name} ..."))
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
+        "X-Auth-Token": token
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(annex, headers=headers) as resp:
             with open(local_name, "wb") as f:
                 f.write(await resp.content.read())
 

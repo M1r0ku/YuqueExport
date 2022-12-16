@@ -5,12 +5,14 @@
 
 ```bash
 $ pip3 install pyuque aiohttp huepy PrettyTable
-```
-
-- 然后在 [语雀-Token](https://www.yuque.com/settings/tokens) 页面申请一个有读取权限的密钥，填入`token`变量然后执行脚本即可
 
 ```
+
+- 浏览器访问 [语雀-Token](https://www.yuque.com/settings/tokens) 页面，新建一个读取权限的密钥，然后将该密钥填入`token`变量，最后执行脚本即可
+
+```bash
 $ python3 YuqueExport.py
+
 ```
 
 ![YuqueExport-1](./YuqueExport-1.jpg)
@@ -18,6 +20,8 @@ $ python3 YuqueExport.py
 
 
 ## 更新
+- 2022-12-16：
+  - 新增：可导出文档中的附件
 - 2022-10-18:
   - 新增：可导出多篇指定文档
 - 2022-09-19
