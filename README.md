@@ -21,6 +21,8 @@ $ python3 YuqueExport.py
 
 
 ## 更新
+- 2024-05-15
+  - 修复：修复 [Issues#6](https://github.com/M1r0ku/YuqueExport/issues/6) 中单个知识库文档数大于100的限制，感谢 [@guanfenglinux](https://github.com/M1r0ku/YuqueExport/issues/6#issuecomment-2071769391) 师傅的代码
 - 2022-12-16
   - 新增：可导出文档中的附件
   - 修复：对图片链接中的特殊符号进行编码
