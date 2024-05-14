@@ -7,6 +7,7 @@ from urllib import parse
 from pyuque.client import Yuque
 from huepy import *
 from prettytable import PrettyTable
+import functools
 
 
 # 获取仓库列表
@@ -182,8 +183,37 @@ async def main():
                 await download_md(repo_id, repo_name, doc_id, doc_title)
 
 
+# 扩展函数
+@functools.wraps(Yuque.repo_list_docs)
+def my_repo_list_docs(self, namespace_or_id):
+    offset = 0
+    data_total = 0
+    data_all = []
+    while True:
+        params = {
+            "offset": offset,
+            "limit": 100
+        }
+        result = self.send_request('GET', '/repos/%s/docs' % namespace_or_id.strip('/'), params=params)
+        data = result["data"]
+        data_all.extend(data)
+        data_total += result["meta"]["total"]
+ 
+        if len(data) < 100:
+            break
+        else:
+            offset += 100
+    # {'meta': {'total': 10}, 'data': []}
+    my_dict = {
+        'meta': {'total': data_total},
+        'data': data_all
+        }
+    return my_dict
+
+
 if __name__ == '__main__':
     token = "<Your_Yuque_Token>"
     yuque = Yuque(token)
+    Yuque.repo_list_docs = my_repo_list_docs
     base_dir = "./YuqueExport"
     asyncio.run(main())
