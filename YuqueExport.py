@@ -1,3 +1,4 @@
+
 import sys
 import re
 import os
@@ -97,7 +98,8 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
 # 下载图片
 async def download_images(image, local_name):
     print(good(f"Download {local_name} ..."))
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(ssl=False)  # 禁用SSL
+    async with aiohttp.ClientSession(connector=connector) as session:
         async with session.get(image) as resp:
             with open(local_name, "wb") as f:
                 f.write(await resp.content.read())
@@ -110,7 +112,8 @@ async def download_annex(annex, local_name):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
         "X-Auth-Token": token
     }
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(ssl=False) # 禁用SSL
+    async with aiohttp.ClientSession(connector=connector) as session:
         async with session.get(annex, headers=headers) as resp:
             with open(local_name, "wb") as f:
                 f.write(await resp.content.read())
@@ -212,7 +215,7 @@ def my_repo_list_docs(self, namespace_or_id):
 
 
 if __name__ == '__main__':
-    token = "<Your_Yuque_Token>"
+    token = ""  # YOUR TOKEN
     yuque = Yuque(token)
     Yuque.repo_list_docs = my_repo_list_docs
     base_dir = "./YuqueExport"

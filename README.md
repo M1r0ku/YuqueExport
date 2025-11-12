@@ -3,6 +3,7 @@
 
 - 安装相关依赖
 
+> 执行如下命令可能出现一些提示：pip install --upgrade pip
 
 ```bash
 $ pip3 install pyuque aiohttp huepy PrettyTable
