@@ -290,7 +290,7 @@ def my_repo_list_docs(self, namespace_or_id):
 
 
 if __name__ == '__main__':
-    token = "1IiyoE1tDtuhA8RmEzhVbSCtF9Fv6zLDzn3fey4w"  # YOUR TOKEN
+    token = ""  # YOUR TOKEN
     yuque = Yuque(token)
     Yuque.repo_list_docs = my_repo_list_docs
     base_dir = "./YuqueExport"
