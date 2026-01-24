@@ -19,9 +19,10 @@ $ python3 YuqueExport.py
 
 ![YuqueExport-1](./YuqueExport-1.jpg)
 
-
-
 ## 更新
+- 2026-01-24
+  - 新增：一键导出所有知识库
+  - 修复：完善 SSL 连接重试机制和容错处理，修复附件解析问题，感谢 [@Jiamu](https://github.com/M1r0ku/YuqueExport/pull/13) 师傅的代码
 - 2024-05-15
   - 修复：修复 [Issues#6](https://github.com/M1r0ku/YuqueExport/issues/6) 中单个知识库文档数大于100的限制，感谢 [@guanfenglinux](https://github.com/M1r0ku/YuqueExport/issues/6#issuecomment-2071769391) 师傅的代码
 - 2022-12-16
