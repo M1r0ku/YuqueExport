@@ -4,11 +4,16 @@ import re
 import os
 import asyncio
 import aiohttp
+import time
 from urllib import parse
 from pyuque.client import Yuque
 from huepy import *
 from prettytable import PrettyTable
 import functools
+from requests.exceptions import SSLError, ConnectionError
+
+# 记录失败的项目
+failed_items = []
 
 
 # 获取仓库列表
@@ -31,17 +36,27 @@ def get_docs(repo_id):
     return docs
 
 
-# 获取文档Markdown代码
-def get_body(repo_id, doc_id):
-    doc = yuque.doc_get(repo_id, doc_id)
-    body = doc['data']['body']
-    body = re.sub("<a name=\"(\w.*)\"></a>", "", body)                 # 正则去除语雀导出的<a>标签
-    body = re.sub(r'\<br \/\>', "\n", body)                            # 正则去除语雀导出的<br />标签
-    body = re.sub(r'\<br \/\>!\[image.png\]', "\n![image.png]", body)  # 正则去除语雀导出的图片后紧跟的<br />标签
-    body = re.sub(r'\)\<br \/\>', ")\n", body)                         # 正则去除语雀导出的图片后紧跟的<br />标签
-    body = re.sub(r'png[#?](.*)+', 'png)', body)                       # 正则去除语雀图片链接特殊符号后的字符串
-    body = re.sub(r'jpeg[#?](.*)+', 'jpeg)', body)                     # 正则去除语雀图片链接特殊符号后的字符串
-    return body
+# 获取文档Markdown代码（带重试机制）
+def get_body(repo_id, doc_id, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            doc = yuque.doc_get(repo_id, doc_id)
+            body = doc['data']['body']
+            body = re.sub("<a name=\"(\w.*)\"></a>", "", body)                 # 正则去除语雀导出的<a>标签
+            body = re.sub(r'\<br \/\>', "\n", body)                            # 正则去除语雀导出的<br />标签
+            body = re.sub(r'\<br \/\>!\[image.png\]', "\n![image.png]", body)  # 正则去除语雀导出的图片后紧跟的<br />标签
+            body = re.sub(r'\)\<br \/\>', ")\n", body)                         # 正则去除语雀导出的图片后紧跟的<br />标签
+            body = re.sub(r'png[#?](.*)+', 'png)', body)                       # 正则去除语雀图片链接特殊符号后的字符串
+            body = re.sub(r'jpeg[#?](.*)+', 'jpeg)', body)                     # 正则去除语雀图片链接特殊符号后的字符串
+            return body
+        except (SSLError, ConnectionError) as e:
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 2  # 递增等待：2秒、4秒
+                print(bad(f"SSL/连接错误，{wait_time}秒后重试 ({attempt + 1}/{max_retries})..."))
+                time.sleep(wait_time)
+            else:
+                print(bad(red(f"重试{max_retries}次后仍然失败")))
+                raise e
 
 
 # 解析文档Markdown代码
@@ -54,8 +69,8 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     assets_dir = os.path.join(repo_dir, "assets")
     make_dir(assets_dir)
 
-    # 保存图片
-    pattern_images = r'(\!\[(.*)\]\((https:\/\/cdn\.nlark\.com\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
+    # 保存图片（使用非贪婪匹配避免多个图片链接混在一起）
+    pattern_images = r'(\!\[([^\]]*)\]\((https:\/\/cdn\.nlark\.com\/yuque\/[^)]+\/(\d+)\/([^)]+\.[a-zA-Z]+))\))'
     images = [index for index in re.findall(pattern_images, body)]
     if images:
         for index, image in enumerate(images):
@@ -65,11 +80,11 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
             local_abs_path = f"{assets_dir}/{doc_title}-{str(index)}.{image_suffix}"                # 保存图片的绝对路径
             doc_title_temp = doc_title.replace(" ", "%20").replace("(", "%28").replace(")", "%29")  # 对特殊符号进行编码
             local_md_path = f"![{doc_title_temp}-{str(index)}](assets/{doc_title_temp}-{str(index)}.{image_suffix})"  # 图片相对路径完整代码
-            await download_images(image_url, local_abs_path)     # 下载图片
+            await download_images(image_url, local_abs_path, doc_title)     # 下载图片
             body = body.replace(image_body, local_md_path)       # 替换链接
 
-    # 保存附件
-    pattern_annexes = r'(\[(.*)\]\((https:\/\/www\.yuque\.com\/attachments\/yuque.*\/(\d+)\/(.*?\.[a-zA-z]+)).*\))'
+    # 保存附件（使用非贪婪匹配避免多个附件链接混在一起）
+    pattern_annexes = r'(\[([^\]]+)\]\((https:\/\/www\.yuque\.com\/attachments\/yuque\/[^)]+\/(\d+)\/([^)]+\.[a-zA-Z]+))\))'
     annexes = [index for index in re.findall(pattern_annexes, body)]
     if annexes:
         for index, annex in enumerate(annexes):
@@ -79,7 +94,7 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
             annex_url = annex_url[0].replace("/attachments/", "/api/v2/attachments/") # 替换为附件API
             local_abs_path = f"{assets_dir}/{annex_name}"           # 保存附件的绝对路径
             local_md_path = f"[{annex_name}](assets/{annex_name})"  # 附件相对路径完整代码
-            await download_annex(annex_url, local_abs_path)         # 下载附件
+            await download_annex(annex_url, local_abs_path, doc_title)         # 下载附件
             body = body.replace(annex_body, local_md_path)          # 替换链接
 
     # 保存文档
@@ -95,28 +110,50 @@ async def download_md(repo_id, repo_name, doc_id, doc_title):
     with open(record_doc_file, "a+") as f:
         f.write(record_doc_output)
 
-# 下载图片
-async def download_images(image, local_name):
-    print(good(f"Download {local_name} ..."))
-    connector = aiohttp.TCPConnector(ssl=False)  # 禁用SSL
-    async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.get(image) as resp:
-            with open(local_name, "wb") as f:
-                f.write(await resp.content.read())
+# 下载图片（带异常处理）
+async def download_images(image, local_name, doc_title=""):
+    try:
+        print(good(f"Download {local_name} ..."))
+        connector = aiohttp.TCPConnector(ssl=False)  # 禁用SSL
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(image) as resp:
+                if resp.status == 200:
+                    with open(local_name, "wb") as f:
+                        f.write(await resp.content.read())
+                    return True
+                else:
+                    print(bad(f"下载图片失败 (HTTP {resp.status}): {local_name}"))
+                    failed_items.append(("图片", doc_title, local_name, f"HTTP {resp.status}"))
+                    return False
+    except Exception as e:
+        print(bad(f"下载图片异常: {local_name} - {str(e)[:50]}"))
+        failed_items.append(("图片", doc_title, local_name, str(e)[:50]))
+        return False
 
 
-# 下载附件
-async def download_annex(annex, local_name):
-    print(good(f"Download {local_name} ..."))
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
-        "X-Auth-Token": token
-    }
-    connector = aiohttp.TCPConnector(ssl=False) # 禁用SSL
-    async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.get(annex, headers=headers) as resp:
-            with open(local_name, "wb") as f:
-                f.write(await resp.content.read())
+# 下载附件（带异常处理）
+async def download_annex(annex, local_name, doc_title=""):
+    try:
+        print(good(f"Download {local_name} ..."))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
+            "X-Auth-Token": token
+        }
+        connector = aiohttp.TCPConnector(ssl=False) # 禁用SSL
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(annex, headers=headers) as resp:
+                if resp.status == 200:
+                    with open(local_name, "wb") as f:
+                        f.write(await resp.content.read())
+                    return True
+                else:
+                    print(bad(f"下载附件失败 (HTTP {resp.status}): {local_name}"))
+                    failed_items.append(("附件", doc_title, local_name, f"HTTP {resp.status}"))
+                    return False
+    except Exception as e:
+        print(bad(f"下载附件异常: {local_name} - {str(e)[:50]}"))
+        failed_items.append(("附件", doc_title, local_name, str(e)[:50]))
+        return False
 
 
 # 创建目录
@@ -137,20 +174,35 @@ async def main():
         repos_table.add_row([repo_id, repo_name])
     print(repos_table)
 
-    # 输入知识库ID,可输入多个,以逗号分隔
-    input_ids = input(lcyan("Repo ID (Example: 111,222): "))
-    temp_ids = [ temp.strip() for temp in input_ids.split(",") ]
+    # 输入知识库ID，支持 ALL 选项
+    print(lcyan("\n提示: 输入 ALL 可一键导出所有知识库的全部笔记"))
+    input_ids = input(lcyan("Repo ID (Example: ALL 或 111,222): "))
+    temp_ids = [temp.strip() for temp in input_ids.split(",")]
 
-    # 检查全部知识库id
-    for temp_id in temp_ids:
-        if temp_id not in all_repos:
-            print(bad(red(f"Repo ID {temp_id} Not Found !")))
-            sys.exit(0)
+    # 判断是否导出全部知识库
+    is_all_repos = "all" in [temp.lower() for temp in temp_ids]
 
-    # 获取知识库全部文档
-    for temp_id in temp_ids:
-        repo = {temp_id: all_repos[temp_id]}     # 根据知识库ID获取知识库名称
-        for repo_id, repo_name in repo.items():
+    if is_all_repos:
+        # 一键导出所有知识库的所有文档
+        print(green(f"\n===== 开始导出全部 {len(all_repos)} 个知识库 ====="))
+        for repo_id, repo_name in all_repos.items():
+            all_docs = get_docs(repo_id)
+            print(cyan(f"\n=====  {repo_name}: {len(all_docs)} docs ===== "))
+
+            # 导出该知识库的所有文档
+            await export_docs(repo_id, repo_name, all_docs)
+    else:
+        # 检查输入的知识库ID是否有效
+        for temp_id in temp_ids:
+            if temp_id not in all_repos:
+                print(bad(red(f"Repo ID {temp_id} Not Found !")))
+                sys.exit(0)
+
+        # 逐个处理选中的知识库
+        for temp_id in temp_ids:
+            repo_id = temp_id
+            repo_name = all_repos[temp_id]
+
             # 获取文档列表
             all_docs = get_docs(repo_id)
             print(cyan(f"\n=====  {repo_name}: {len(all_docs)} docs ===== "))
@@ -159,31 +211,54 @@ async def main():
                 docs_table.add_row([doc_id, doc_title])
             print(docs_table)
 
-            # 输入文档ID,可输入多个,以逗号分隔
-            input_doc_ids = input(lcyan("Doc ID (Example: 111,222 or ALL): "))
+            # 输入文档ID，支持 ALL 选项
+            input_doc_ids = input(lcyan("Doc ID (Example: ALL 或 111,222): "))
             temp_doc_ids = [temp.strip() for temp in input_doc_ids.split(",")]
 
             # 判断是否获取全部文档
-            is_all = "all" in [temp.lower() for temp in temp_doc_ids]
+            is_all_docs = "all" in [temp.lower() for temp in temp_doc_ids]
 
-            # 根据文档ID获取指定文档
-            if not is_all:
+            # 根据文档ID筛选文档
+            if not is_all_docs:
                 temp_docs = dict()
                 for temp_doc_id in temp_doc_ids:
                     try:
                         temp_docs[temp_doc_id] = all_docs[temp_doc_id]
                     except KeyError:
                         print(bad(red(f"Doc ID {temp_doc_id} Not Found !!")))
-                # 将需要获取的文档赋值给all_docs
                 all_docs = temp_docs
 
-            # 获取文档内容
-            for doc_id, doc_title in all_docs.items():
-                # 将不能作为文件名的字符进行编码
-                for char in r'/\<>?:"|*':
-                    doc_title = doc_title.replace(char, parse.quote_plus(char))
-                print(run(cyan(f"Get Doc {doc_title} ...")))
-                await download_md(repo_id, repo_name, doc_id, doc_title)
+            # 导出文档
+            await export_docs(repo_id, repo_name, all_docs)
+
+    # 输出失败汇总
+    if failed_items:
+        print(yellow(f"\n===== 失败汇总 ({len(failed_items)} 项) ====="))
+        for item in failed_items:
+            if len(item) == 4:  # 图片/附件: (类型, 笔记名, 文件名, 错误)
+                item_type, doc_name, file_name, error = item
+                print(bad(f"[{item_type}] 笔记「{doc_name}」- {file_name}: {error}"))
+            else:  # 文档: (类型, 笔记名, 错误)
+                item_type, doc_name, error = item
+                print(bad(f"[{item_type}] 「{doc_name}」: {error}"))
+    else:
+        print(green("\n===== 全部下载成功！====="))
+
+
+# 导出文档的公共函数
+async def export_docs(repo_id, repo_name, all_docs):
+    """导出指定知识库下的文档"""
+    for doc_id, doc_title in all_docs.items():
+        # 将不能作为文件名的字符进行编码
+        for char in r'/\<>?:"|*':
+            doc_title = doc_title.replace(char, parse.quote_plus(char))
+        print(run(cyan(f"Get Doc {doc_title} ...")))
+        try:
+            await download_md(repo_id, repo_name, doc_id, doc_title)
+        except Exception as e:
+            print(bad(red(f"文档下载失败，已跳过: {doc_title} - {str(e)[:80]}")))
+            failed_items.append(("文档", doc_title, str(e)[:80]))
+        await asyncio.sleep(0.5)  # 每个文档之间等待0.5秒，避免请求过快
 
 
 # 扩展函数
@@ -215,7 +290,7 @@ def my_repo_list_docs(self, namespace_or_id):
 
 
 if __name__ == '__main__':
-    token = ""  # YOUR TOKEN
+    token = "1IiyoE1tDtuhA8RmEzhVbSCtF9Fv6zLDzn3fey4w"  # YOUR TOKEN
     yuque = Yuque(token)
     Yuque.repo_list_docs = my_repo_list_docs
     base_dir = "./YuqueExport"
