@@ -16,10 +16,26 @@ from requests.exceptions import SSLError, ConnectionError
 failed_items = []
 
 
+class YuqueAPIError(RuntimeError):
+    """语雀 API 返回错误时抛出的可读异常。"""
+
+
+def get_api_data(result, action):
+    """校验语雀 API 响应并返回 data，避免用 KeyError 掩盖真实错误。"""
+    if not isinstance(result, dict):
+        raise YuqueAPIError(f"{action}失败：语雀 API 返回了无法识别的响应")
+    if "data" not in result:
+        status = result.get("status", "未知状态")
+        message = result.get("message", "响应中缺少 data 字段")
+        raise YuqueAPIError(f"{action}失败（HTTP {status}）：{message}")
+    return result["data"]
+
+
 # 获取仓库列表
 def get_repos(user_id):
     repos = {}
-    for repo in yuque.user_list_repos(user_id)['data']:
+    result = yuque.user_list_repos(user_id)
+    for repo in get_api_data(result, "获取知识库列表"):
         repo_id = str(repo['id'])
         repo_name = repo['name']
         repos[repo_id] = repo_name
@@ -29,7 +45,8 @@ def get_repos(user_id):
 # 获取指定仓库下的文档列表
 def get_docs(repo_id):
     docs = {}
-    for doc in yuque.repo_list_docs(repo_id)['data']:
+    result = yuque.repo_list_docs(repo_id)
+    for doc in get_api_data(result, f"获取知识库 {repo_id} 的文档列表"):
         doc_id = str(doc['id'])
         doc_title = doc['title']
         docs[doc_id] = doc_title
@@ -41,8 +58,8 @@ def get_body(repo_id, doc_id, max_retries=3):
     for attempt in range(max_retries):
         try:
             doc = yuque.doc_get(repo_id, doc_id)
-            body = doc['data']['body']
-            body = re.sub("<a name=\"(\w.*)\"></a>", "", body)                 # 正则去除语雀导出的<a>标签
+            body = get_api_data(doc, f"获取文档 {doc_id}")["body"]
+            body = re.sub(r'<a name="[^\"]*"></a>', "", body)                # 正则去除语雀导出的<a>标签
             body = re.sub(r'\<br \/\>', "\n", body)                            # 正则去除语雀导出的<br />标签
             body = re.sub(r'\<br \/\>!\[image.png\]', "\n![image.png]", body)  # 正则去除语雀导出的图片后紧跟的<br />标签
             body = re.sub(r'\)\<br \/\>', ")\n", body)                         # 正则去除语雀导出的图片后紧跟的<br />标签
@@ -165,7 +182,8 @@ def make_dir(path):
 
 async def main():
     # 获取用户ID
-    user_id = yuque.user.get()['data']['id']
+    user = get_api_data(yuque.user.get(), "获取当前用户信息")
+    user_id = user['id']
 
     # 获取知识库列表
     all_repos = get_repos(user_id)
@@ -273,9 +291,9 @@ def my_repo_list_docs(self, namespace_or_id):
             "limit": 100
         }
         result = self.send_request('GET', '/repos/%s/docs' % namespace_or_id.strip('/'), params=params)
-        data = result["data"]
+        data = get_api_data(result, f"获取知识库 {namespace_or_id} 的文档列表")
         data_all.extend(data)
-        data_total += result["meta"]["total"]
+        data_total = result.get("meta", {}).get("total", len(data_all))
  
         if len(data) < 100:
             break
@@ -294,4 +312,12 @@ if __name__ == '__main__':
     yuque = Yuque(token)
     Yuque.repo_list_docs = my_repo_list_docs
     base_dir = "./YuqueExport"
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except YuqueAPIError as e:
+        print(bad(red(f"\n{e}")))
+        print(yellow("请在语雀 Token 设置中补充所需的读取权限后重试。"))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print(yellow("\n操作已取消。"))
+        sys.exit(130)
